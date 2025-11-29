@@ -53,8 +53,16 @@ const generateDocId = (docType) => `${docType === 'QUOTE' ? 'QT' : 'INV'}_${Date
  */
 export default function CardanoInvoiceApp() {
   const [activeTab, setActiveTab] = useState('chat'); 
-  const [walletConnected, setWalletConnected] = useState(false); 
+  const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
+  const [smtpConfig, setSmtpConfig] = useState({
+    host: 'smtp.gmail.com',
+    port: '587',
+    username: '',
+    password: ''
+  });
+  const [smtpReady, setSmtpReady] = useState(false);
+  const [sendingDocId, setSendingDocId] = useState(null);
   
   // Chat State
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
@@ -73,6 +81,18 @@ export default function CardanoInvoiceApp() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://smtpjs.com/v3/smtp.js';
+    script.async = true;
+    script.onload = () => setSmtpReady(true);
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   // --- Handlers ---
 
@@ -114,8 +134,7 @@ export default function CardanoInvoiceApp() {
     const latestDoc = messages.slice().reverse().find(msg => msg.type === 'invoice_card')?.data;
 
     if (latestDoc) {
-      const message = `Simulating 'Send to Client' functionality for ${latestDoc.docType} #${latestDoc.id}: Automated email with PayLink generated for ${latestDoc.customerName}.`;
-      setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+      handleDocumentAction(latestDoc, 'send');
     } else {
       const message = "No document generated yet. Please create a Quote or Invoice first.";
       setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
@@ -218,16 +237,85 @@ export default function CardanoInvoiceApp() {
     }, 2000);
   };
   
-  // Custom Alert Handler
-  const handleDocumentAction = (docId, action) => {
-    let message = '';
+  // Build a simple HTML email with document details
+  const buildEmailBody = (doc) => {
+    const currencySymbol = doc.currency === 'USD' ? '$' : doc.currency === 'INR' ? '₹' : doc.currency === 'EUR' ? '€' : '₳';
+    const itemsRows = doc.items.map(item => (
+      `<tr><td style="padding:6px 8px;border:1px solid #e5e7eb;">${item.desc}</td><td style="padding:6px 8px;border:1px solid #e5e7eb;text-align:right;">${item.qty}</td><td style="padding:6px 8px;border:1px solid #e5e7eb;text-align:right;">${(item.qty * item.price).toFixed(2)}</td></tr>`
+    )).join('');
+
+    return `
+      <div style="font-family:Arial, sans-serif; color:#111827;">
+        <h2 style="margin-bottom:4px;">${doc.docType === 'QUOTE' ? 'Quote' : 'Invoice'} ${doc.id}</h2>
+        <p style="margin-top:0;">Hi ${doc.customerName}, please find your ${doc.docType === 'QUOTE' ? 'quote' : 'invoice'} summary below.</p>
+        <p><strong>Bill To:</strong> ${doc.customerName}<br/>
+        <strong>Email:</strong> ${doc.customerEmail}<br/>
+        <strong>Billing Address:</strong> ${doc.billingAddr.replace(/\n/g, '<br/>')}</p>
+        <table style="border-collapse:collapse; width:100%; margin:16px 0;">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding:6px 8px; border:1px solid #e5e7eb;">Description</th>
+              <th style="text-align:right; padding:6px 8px; border:1px solid #e5e7eb;">Qty</th>
+              <th style="text-align:right; padding:6px 8px; border:1px solid #e5e7eb;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${itemsRows}</tbody>
+        </table>
+        <p style="font-size:16px; margin:8px 0;"><strong>Grand Total:</strong> ${currencySymbol}${doc.total.toFixed(2)}</p>
+        <p style="font-size:14px; color:#374151;">Terms: ${doc.termsAndConditions}</p>
+        <p style="margin-top:16px;">Thank you,<br/>Blue Dot</p>
+      </div>
+    `;
+  };
+
+  // Custom Alert Handler with SMTP sending
+  const handleDocumentAction = async (doc, action) => {
     if (action === 'send') {
-        message = `Email sent! Document ${docId} securely delivered with a PayLink.`;
-    } else if (action === 'share') {
-        message = `Share link copied! Secure link for ${docId} is ready to share.`;
+      if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.username || !smtpConfig.password) {
+        const message = 'Please provide SMTP host, port, sender email, and password before sending.';
+        setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+        setTimeout(() => setMessages(prev => prev.filter(msg => msg.role !== 'system_alert')), 3000);
+        return;
+      }
+
+      if (!smtpReady || typeof window.Email === 'undefined') {
+        const message = 'SMTP library is still loading. Please try again in a moment.';
+        setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+        setTimeout(() => setMessages(prev => prev.filter(msg => msg.role !== 'system_alert')), 3000);
+        return;
+      }
+
+      try {
+        setSendingDocId(doc.id);
+        await window.Email.send({
+          Host: smtpConfig.host,
+          Port: smtpConfig.port,
+          Username: smtpConfig.username,
+          Password: smtpConfig.password,
+          To: doc.customerEmail,
+          From: smtpConfig.username,
+          Subject: `${doc.docType === 'QUOTE' ? 'Quote' : 'Invoice'} ${doc.id} from Blue Dot`,
+          Body: buildEmailBody(doc)
+        });
+
+        const message = `Email sent! ${doc.docType} ${doc.id} delivered to ${doc.customerEmail}.`;
+        setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+      } catch (error) {
+        const message = `Failed to send email for ${doc.id}. Please check SMTP credentials.`;
+        console.error(error);
+        setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+      } finally {
+        setSendingDocId(null);
+        setTimeout(() => setMessages(prev => prev.filter(msg => msg.role !== 'system_alert')), 3000);
+      }
+      return;
     }
-    setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
-    setTimeout(() => setMessages(prev => prev.filter(msg => msg.role !== 'system_alert')), 3000);
+
+    if (action === 'share') {
+      const message = `Share link copied! Secure link for ${doc.id} is ready to share.`;
+      setMessages(prev => [...prev, { id: Date.now(), role: 'system_alert', text: message }]);
+      setTimeout(() => setMessages(prev => prev.filter(msg => msg.role !== 'system_alert')), 3000);
+    }
   };
 
 
@@ -308,6 +396,9 @@ export default function CardanoInvoiceApp() {
             
             {activeTab === 'chat' ? (
               <div className="h-full flex flex-col">
+                <div className="px-4 md:px-6 pt-4">
+                  <SmtpSettingsPanel smtpConfig={smtpConfig} onUpdate={setSmtpConfig} />
+                </div>
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar">
                   {messages.map((msg) => (
@@ -359,10 +450,11 @@ export default function CardanoInvoiceApp() {
                             )}
 
                             {msg.type === 'invoice_card' && (
-                              <InvoicePreviewCard 
-                                data={msg.data} 
-                                onPay={() => handlePayInvoice(msg.data.id, msg.data.amountADA, msg.data.items[0]?.desc || 'Service', msg.data.docType)} 
+                              <InvoicePreviewCard
+                                data={msg.data}
+                                onPay={() => handlePayInvoice(msg.data.id, msg.data.amountADA, msg.data.items[0]?.desc || 'Service', msg.data.docType)}
                                 onDocumentAction={handleDocumentAction}
+                                isSendingEmail={sendingDocId === msg.data.id}
                                 walletConnected={walletConnected}
                               />
                             )}
@@ -411,6 +503,64 @@ export default function CardanoInvoiceApp() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * SMTP SETTINGS PANEL
+ */
+function SmtpSettingsPanel({ smtpConfig, onUpdate }) {
+  return (
+    <div className="bg-gray-800 border border-gray-700 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-gray-200 text-sm font-semibold">Email Setup (SMTP)</p>
+          <p className="text-gray-400 text-xs">Use your email credentials to deliver quotes directly to clients.</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">SMTP Host</label>
+          <input
+            value={smtpConfig.host}
+            onChange={(e) => onUpdate(prev => ({ ...prev, host: e.target.value }))}
+            placeholder="smtp.gmail.com"
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Port</label>
+          <input
+            value={smtpConfig.port}
+            onChange={(e) => onUpdate(prev => ({ ...prev, port: e.target.value }))}
+            placeholder="587"
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Sender Email (Username)</label>
+          <input
+            value={smtpConfig.username}
+            onChange={(e) => onUpdate(prev => ({ ...prev, username: e.target.value }))}
+            placeholder="you@example.com"
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-400">Email Password / App Password</label>
+          <input
+            type="password"
+            value={smtpConfig.password}
+            onChange={(e) => onUpdate(prev => ({ ...prev, password: e.target.value }))}
+            placeholder="App password"
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+      </div>
+      <p className="text-[11px] text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+        Tips: use provider-specific app passwords, and ensure less-secure app access is permitted for your account.
+      </p>
+    </div>
   );
 }
 
@@ -672,7 +822,7 @@ function InvoiceFormBubble({ onSubmit, defaultType = 'INVOICE' }) {
 /**
  * INVOICE PREVIEW CARD (incorporates all fixes)
  */
-function InvoicePreviewCard({ data, onPay, onDocumentAction, walletConnected }) {
+function InvoicePreviewCard({ data, onPay, onDocumentAction, isSendingEmail, walletConnected }) {
   const { 
     id, 
     docType, 
@@ -819,14 +969,18 @@ function InvoicePreviewCard({ data, onPay, onDocumentAction, walletConnected }) 
           
           {/* Action Row: Send to Client & Share */}
           <div className="flex gap-2">
-             <button 
-                onClick={() => onDocumentAction(id, 'send')}
-                className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors"
+             <button
+                onClick={() => onDocumentAction(data, 'send')}
+                disabled={isSendingEmail}
+                className={`flex-1 text-white py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors ${
+                  isSendingEmail ? 'bg-green-300 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'
+                }`}
               >
-                <Mail size={16}/> Send to Client
+                {isSendingEmail ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16}/>}
+                {isSendingEmail ? 'Sending...' : 'Send to Client'}
               </button>
-              <button 
-                onClick={() => onDocumentAction(id, 'share')}
+              <button
+                onClick={() => onDocumentAction(data, 'share')}
                 className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors"
               >
                 <Share2 size={16}/> Share Link
