@@ -447,6 +447,7 @@ function InvoiceFormBubble({ onSubmit, defaultType = 'INVOICE' }) {
   const [docType, setDocType] = useState(defaultType); // INVOICE | QUOTE
   const [currency, setCurrency] = useState('USD');
   const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [gstNumber, setGstNumber] = useState('');
   const [billingAddr, setBillingAddr] = useState(''); // FIX 1: Mandatory
   const [termsAndConditions, setTermsAndConditions] = useState("Payment due within 30 days. Late payments incur a 5% penalty."); // FIX 2: Mandatory field
@@ -483,9 +484,15 @@ function InvoiceFormBubble({ onSubmit, defaultType = 'INVOICE' }) {
 
   const handleSubmit = () => {
     // Validation
-    if (!customerName.trim() || !billingAddr.trim() || !termsAndConditions.trim()) {
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!customerName.trim() || !billingAddr.trim() || !termsAndConditions.trim() || !customerEmail.trim()) {
       // FIX: Use console.error instead of alert()
-      console.error("Client Name, Billing Address, and Terms & Conditions are mandatory.");
+      console.error("Client Name, Email, Billing Address, and Terms & Conditions are mandatory.");
+      return;
+    }
+
+    if (!emailPattern.test(customerEmail.trim())) {
+      console.error("Please enter a valid client email address.");
       return;
     }
     if (items.some(i => !i.desc.trim() || i.price <= 0)) {
@@ -500,9 +507,10 @@ function InvoiceFormBubble({ onSubmit, defaultType = 'INVOICE' }) {
     onSubmit({
       docType,
       customerName,
+      customerEmail,
       gstNumber,
       billingAddr,
-      termsAndConditions, 
+      termsAndConditions,
       items,
       currency,
       ...totals
@@ -544,12 +552,17 @@ function InvoiceFormBubble({ onSubmit, defaultType = 'INVOICE' }) {
         {/* Customer Section */}
         <div className="space-y-3">
           <label className="text-xs font-semibold text-gray-500 uppercase">Client Details (Mandatory fields *)</label>
-          <input 
+          <input
             type="text" placeholder="* Client / Company Name"
             className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-blue-500 outline-none"
             value={customerName} onChange={e => setCustomerName(e.target.value)}
           />
-          <input 
+          <input
+            type="email" placeholder="* Client Email"
+            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-blue-500 outline-none"
+            value={customerEmail} onChange={e => setCustomerEmail(e.target.value)}
+          />
+          <input
             type="text" placeholder="GST / Tax ID (Optional)"
             className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-blue-500 outline-none"
             value={gstNumber} onChange={e => setGstNumber(e.target.value)}
@@ -663,9 +676,10 @@ function InvoicePreviewCard({ data, onPay, onDocumentAction, walletConnected }) 
   const { 
     id, 
     docType, 
-    customerName, 
-    gstNumber, 
-    billingAddr, 
+    customerName,
+    customerEmail,
+    gstNumber,
+    billingAddr,
     termsAndConditions, // FIX 2: Added T&C
     items, 
     currency, 
@@ -724,6 +738,10 @@ function InvoicePreviewCard({ data, onPay, onDocumentAction, walletConnected }) 
           <div>
             <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1 block">Bill To</span>
             <h3 className="font-bold text-gray-800 text-sm text-wrap-break">{customerName}</h3>
+            <p className="text-[10px] text-gray-600 flex items-center gap-1 mt-1">
+              <Mail size={12} />
+              <span className="font-mono">{customerEmail}</span>
+            </p>
             {gstNumber && (
               <p className="text-[10px] text-gray-600 mt-1">GST/Tax ID: <span className="font-mono">{gstNumber}</span></p>
             )}
