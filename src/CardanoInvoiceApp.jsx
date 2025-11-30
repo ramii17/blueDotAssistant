@@ -20,8 +20,8 @@ import {
   LogIn,
   Save,
   Key,
-  CreditCard as CreditCardIcon, // Aliased to avoid conflict
-  Link,
+  CreditCard as CreditCardIcon,
+  Link as LinkIcon,
 } from "lucide-react";
 
 /**
@@ -29,9 +29,9 @@ import {
  */
 const EXCHANGE_RATES = {
   ADA: 1,
-  USD: 0.45, // 1 ADA = $0.45
-  INR: 37.5, // 1 ADA = ₹37.50
-  EUR: 0.41, // 1 ADA = €0.41
+  USD: 0.45,
+  INR: 37.5,
+  EUR: 0.41,
 };
 
 const INITIAL_MESSAGES = [
@@ -45,7 +45,7 @@ const INITIAL_MESSAGES = [
     id: 2,
     role: "agent",
     text: "How can I help you generate a document today? (Try typing: 'I need an invoice for consulting')",
-    type: "quick_actions", // Message type for buttons
+    type: "quick_actions",
   },
 ];
 
@@ -56,83 +56,88 @@ const MOCK_RECEIPTS = [
     service: "Logo Design",
     amount: 450,
     status: "PAID",
-    hash: "tx_8d5f...b92a", // Mock Transaction Hash
+    hash: "tx_8d5f...b92a",
     date: "2025-10-24",
   },
 ];
 
-const generateHash = () => 'tx_' + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
+const generateHash = () =>
+  "tx_" +
+  Math.random().toString(36).substr(2, 9) +
+  Math.random().toString(36).substr(2, 9);
 
-// --- UPDATED ID GENERATION FUNCTION (Sequential/Fiscal Year) ---
+// Sequential doc ID with fiscal year (note: contains "/")
 const generateDocId = (docType) => {
   const date = new Date();
   const currentYear = date.getFullYear();
-  const currentMonth = date.getMonth(); // 0 = Jan, 3 = Apr, 11 = Dec
+  const currentMonth = date.getMonth();
 
   let startYear;
   let endYear;
 
-  // Determine the Fiscal Year (e.g., runs from April 1st to March 31st)
-  if (currentMonth >= 3) { // April (3) through December (11)
+  if (currentMonth >= 3) {
     startYear = currentYear;
     endYear = currentYear + 1;
-  } else { // January (0) through March (2)
+  } else {
     startYear = currentYear - 1;
     endYear = currentYear;
   }
 
-  const fiscalYear = `${String(startYear).slice(-2)}-${String(endYear).slice(-2)}`; // e.g., '25-26'
-  
-  // Sequential part: Use a random number (01 to 99) for this demo.
-  // This simulates fetching the next sequential document number from a database.
-  const sequential = String(Math.floor(Math.random() * 99) + 1).padStart(2, '0'); 
-  
-  // New format: SEQUENCE/FISCAL_YEAR (e.g., '01/25-26')
-  return `${sequential}/${fiscalYear}`; 
+  const fiscalYear = `${String(startYear).slice(-2)}-${String(
+    endYear
+  ).slice(-2)}`;
+  const sequential = String(
+    Math.floor(Math.random() * 99) + 1
+  ).padStart(2, "0");
+  return `${sequential}/${fiscalYear}`;
 };
 
 // --- Backend/API Integration ---
 
-const BACKEND_URL = "http://localhost:4000";
+// Will use env in production, localhost in dev
+const BACKEND_URL =
+  import.meta?.env?.VITE_BACKEND_URL || "http://localhost:4000";
 
 /**
- * **REAL API CALL**
- * This function calls the Express backend to handle real SMTP email sending
- * using the provided user credentials and the document data.
+ * Call backend to send email
  */
 async function sendDocumentEmailViaBackend(doc, smtpConfig) {
   if (!smtpConfig.username || !smtpConfig.password) {
     throw new Error("SMTP credentials missing.");
   }
-  
+
   const response = await fetch(`${BACKEND_URL}/api/send-document-email`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       smtpUser: smtpConfig.username,
       smtpPass: smtpConfig.password,
       doc: doc,
     }),
   });
-  
+
   if (!response.ok) {
     let errorDetail = "Failed to send email via backend API.";
     try {
-        const errorBody = await response.json();
-        errorDetail = errorBody.error || errorDetail;
-    } catch (e) { /* ignore parse error */ }
+      const errorBody = await response.json();
+      errorDetail = errorBody.error || errorDetail;
+    } catch (e) {}
     throw new Error(errorDetail);
   }
-  
+
   return { success: true, message: "Email queued successfully by backend" };
 }
 
 /**
  * Checks the status of a document from the backend API.
+ * IMPORTANT: encodeURIComponent(docId) to support "01/25-26"
  */
 async function checkInvoiceStatus(docId) {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/invoices/${docId}`);
+    const encodedId = encodeURIComponent(docId);
+    const response = await fetch(
+      `${BACKEND_URL}/api/invoices/${encodedId}`
+    );
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`API Error: ${response.status}`);
@@ -146,43 +151,44 @@ async function checkInvoiceStatus(docId) {
 
 /**
  * MASUMI MONETIZATION MOCK
- * This simulates a successful on-chain agent invocation payment.
  */
 function mockMasumiMonetization(setMessages) {
-    const message = "✅ Masumi Agent Invocation: 0.1 ADA paid to Copilot. Form activated.";
-    setMessages((prev) => [
-        ...prev,
-        { id: Date.now(), role: "system_alert", text: message },
-    ]);
-    setTimeout(() => setMessages((prev) => prev.filter((msg) => msg.text !== message)), 4000);
+  const message =
+    "✅ Masumi Agent Invocation: 0.1 ADA paid to Copilot. Form activated.";
+  setMessages((prev) => [
+    ...prev,
+    { id: Date.now(), role: "system_alert", text: message },
+  ]);
+  setTimeout(
+    () =>
+      setMessages((prev) => prev.filter((msg) => msg.text !== message)),
+    4000
+  );
 }
 
-
-// --- MAIN COMPONENT (CardanoInvoiceApp) ---
+// --- MAIN COMPONENT ---
 
 export default function CardanoInvoiceApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
   const [userProfile, setUserProfile] = useState({
-    username: "Danduprolu Stuthi", // Default from project brief
+    username: "Danduprolu Stuthi",
     smtpConfig: {
-      host: "smtp.gmail.com", // Host/Port is for display, backend handles it
+      host: "smtp.gmail.com",
       port: "587",
       username: "",
       password: "",
     },
-    receivingAddress: "addr1qx...3k9z", // Merchant's Cardano address
+    receivingAddress: "addr1qx...3k9z",
   });
-  
-  const [sendingDocId, setSendingDocId] = useState(null);
-  const [polledDocs, setPolledDocs] = useState([]); // Array of doc IDs to poll
 
-  // Chat State
+  const [sendingDocId, setSendingDocId] = useState(null);
+  const [polledDocs, setPolledDocs] = useState([]);
+
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
 
-  // Receipt State
   const [receipts, setReceipts] = useState(MOCK_RECEIPTS);
 
   const messagesEndRef = useRef(null);
@@ -193,53 +199,64 @@ export default function CardanoInvoiceApp() {
     scrollToBottom();
   }, [messages]);
 
-
-  // --- Status Polling Logic (NEW) ---
+  // --- Status Polling Logic ---
   useEffect(() => {
     if (polledDocs.length === 0) return;
 
     const intervalId = setInterval(() => {
       polledDocs.forEach(async (docId) => {
         const updatedDoc = await checkInvoiceStatus(docId);
-        
+
         if (updatedDoc && updatedDoc.clientDecision) {
-          // 1. Decision received! Stop polling for this ID.
-          setPolledDocs(prev => prev.filter(id => id !== docId));
-          
+          setPolledDocs((prev) => prev.filter((id) => id !== docId));
+
           const decision = updatedDoc.clientDecision;
           const statusMessage = `✅ Client Decision Received! ${docId} was **${decision}** by the client. The card has been updated.`;
-          
-          // 2. Update the chat messages/card
-          setMessages(prev => {
-            const updated = prev.map(msg => {
+
+          setMessages((prev) => {
+            const updated = prev.map((msg) => {
               if (msg.type === "invoice_card" && msg.data.id === docId) {
                 return {
                   ...msg,
                   data: {
                     ...msg.data,
                     clientDecision: decision,
-                    status: decision === "APPROVED" ? "ACCEPTED" : "REJECTED",
-                  }
+                    status:
+                      decision === "APPROVED" ? "ACCEPTED" : "REJECTED",
+                  },
                 };
               }
               return msg;
             });
-            // 3. Add system alert
-            return [...updated, { id: Date.now() + 10, role: "system_alert", text: statusMessage }];
+            return [
+              ...updated,
+              {
+                id: Date.now() + 10,
+                role: "system_alert",
+                text: statusMessage,
+              },
+            ];
           });
 
-          // 4. Update receipts
-          setReceipts(prev => prev.map(r => r.id === docId ? {...r, status: decision === "APPROVED" ? "ACCEPTED" : "REJECTED"} : r));
-
+          setReceipts((prev) =>
+            prev.map((r) =>
+              r.id === docId
+                ? {
+                    ...r,
+                    status:
+                      decision === "APPROVED" ? "ACCEPTED" : "REJECTED",
+                  }
+                : r
+            )
+          );
         }
       });
-    }, 5000); // Poll every 5 seconds
+    }, 5000);
 
-    return () => clearInterval(intervalId); // Cleanup on unmount or when dependencies change
-  }, [polledDocs, setMessages, setReceipts]);
+    return () => clearInterval(intervalId);
+  }, [polledDocs]);
 
-
-  // --- Persistence & Authentication Handlers ---
+  // --- Persistence & Auth ---
 
   const loadInitialState = useCallback(() => {
     const savedLogin = localStorage.getItem("isLoggedIn");
@@ -256,10 +273,8 @@ export default function CardanoInvoiceApp() {
   }, [loadInitialState]);
 
   const handleLogin = (username, password) => {
-    // Mock Login Logic
     if (username === "merchant" && password === "cardano123") {
       setIsLoggedIn(true);
-      // Load or set default profile for mock user
       const defaultProfile = {
         username: "Danduprolu Stuthi",
         smtpConfig: {
@@ -270,7 +285,8 @@ export default function CardanoInvoiceApp() {
         },
         receivingAddress: "addr1qx...3k9z",
       };
-      const profileToUse = JSON.parse(localStorage.getItem("userProfile")) || defaultProfile;
+      const profileToUse =
+        JSON.parse(localStorage.getItem("userProfile")) || defaultProfile;
       setUserProfile(profileToUse);
       localStorage.setItem("isLoggedIn", "true");
       localStorage.setItem("userProfile", JSON.stringify(profileToUse));
@@ -302,22 +318,19 @@ export default function CardanoInvoiceApp() {
     );
   };
 
-
   // --- Chat & Document Handlers ---
 
   const handleQuickAction = (actionType) => {
     const isQuote = actionType === "QUOTE";
     const actionText = isQuote ? "Create Quote" : "Create Invoice";
-    // 1. Add user message (simulated click)
+
     setMessages((prev) => [
       ...prev,
       { id: Date.now(), role: "user", text: actionText, type: "text" },
     ]);
-    
-    // 2. Mock Masumi Monetization
+
     mockMasumiMonetization(setMessages);
 
-    // 3. Trigger form request
     setIsTyping(true);
     setTimeout(() => {
       setIsTyping(false);
@@ -334,10 +347,9 @@ export default function CardanoInvoiceApp() {
         },
       ]);
       scrollToBottom();
-    }, 1000); // 1s delay for Masumi alert to show first
+    }, 1000);
   };
 
-  // Global handler for the top-right button
   const handleSendLatestToClient = () => {
     const latestDoc = messages
       .slice()
@@ -362,9 +374,6 @@ export default function CardanoInvoiceApp() {
     );
   };
 
-  /**
-   * CHAT-TO-PAY FLOW
-   */
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
@@ -379,31 +388,32 @@ export default function CardanoInvoiceApp() {
     setInputText("");
     setIsTyping(true);
 
-    // Mock AI Intent Recognition
     let docType = null;
-    if (lowerCaseText.includes("invoice") || lowerCaseText.includes("bill")) {
+    if (
+      lowerCaseText.includes("invoice") ||
+      lowerCaseText.includes("bill")
+    ) {
       docType = "INVOICE";
-    } else if (lowerCaseText.includes("quote") || lowerCaseText.includes("estimate")) {
+    } else if (
+      lowerCaseText.includes("quote") ||
+      lowerCaseText.includes("estimate")
+    ) {
       docType = "QUOTE";
     }
 
     setTimeout(() => {
       setIsTyping(false);
       if (docType) {
-        // 1. Mock Masumi Monetization (Agent Invocation)
         mockMasumiMonetization(setMessages);
-
-        // 2. Agent responds with form
         const agentResponse = {
-            id: Date.now() + 2,
-            role: "agent",
-            text: `Analyzing request... Found intent for a new ${docType}. Please confirm the details below.`,
-            type: "form_request",
-            defaultType: docType,
+          id: Date.now() + 2,
+          role: "agent",
+          text: `Analyzing request... Found intent for a new ${docType}. Please confirm the details below.`,
+          type: "form_request",
+          defaultType: docType,
         };
         setMessages((prev) => [...prev, agentResponse]);
       } else {
-        // Generic response
         const agentResponse = {
           id: Date.now() + 1,
           role: "agent",
@@ -416,27 +426,23 @@ export default function CardanoInvoiceApp() {
     }, 1500);
   };
 
-  // Called when the user submits the form bubble
   const handleFormSubmit = (formData) => {
-    // 1. Calculate Conversions
-    const rate = EXCHANGE_RATES[formData.currency] || 1;
     const totalInADA = Math.ceil(
-      formData.total / (EXCHANGE_RATES[formData.currency] / EXCHANGE_RATES["ADA"])
+      formData.total /
+        (EXCHANGE_RATES[formData.currency] / EXCHANGE_RATES["ADA"])
     );
-    // 2. Create the Invoice Object
+
     const newDoc = {
       id: generateDocId(formData.docType),
       ...formData,
-      customerEmail: formData.customerEmail, 
+      customerEmail: formData.customerEmail,
       amountADA: totalInADA,
-      status: formData.docType === "QUOTE" ?
-        "DRAFT" : "PENDING",
+      status: formData.docType === "QUOTE" ? "DRAFT" : "PENDING",
       clientDecision: null,
-      hash: "TX_AWAITING", // Placeholder for transaction hash
-      merchantAddress: userProfile.receivingAddress, // Attach merchant address
+      hash: "TX_AWAITING",
+      merchantAddress: userProfile.receivingAddress,
     };
 
-    // 3. Add the "Invoice Card" to chat
     setMessages((prev) => [
       ...prev,
       {
@@ -449,10 +455,9 @@ export default function CardanoInvoiceApp() {
         id: Date.now() + 1,
         role: "system_alert",
         text: `${newDoc.docType} ${newDoc.id} generated. Metadata (ID, total) is ready for **on-chain logging** after payment is confirmed.`,
-      }
+      },
     ]);
 
-    // 4. Update Receipts for tracking
     const newReceipt = {
       id: newDoc.id,
       type: newDoc.docType,
@@ -462,15 +467,18 @@ export default function CardanoInvoiceApp() {
       hash: "TX_AWAITING",
       date: new Date().toISOString().split("T")[0],
     };
-    setReceipts((prev) => [newReceipt, ...prev.filter(r => r.id !== newDoc.id)]);
+    setReceipts((prev) => [
+      newReceipt,
+      ...prev.filter((r) => r.id !== newDoc.id),
+    ]);
   };
 
-  // Custom Alert Handler with backend SMTP sending
   const handleDocumentAction = async (doc, action) => {
     const smtpConfig = userProfile.smtpConfig;
 
     if (action === "paylink") {
-      const message = "Cardano PayLink functionality is disabled as per user request.";
+      const message =
+        "Cardano PayLink functionality is disabled as per user request.";
       setMessages((prev) => [
         ...prev,
         { id: Date.now(), role: "system_alert", text: message },
@@ -485,13 +493,8 @@ export default function CardanoInvoiceApp() {
       return;
     }
 
-
     if (action === "send") {
-      // Email sending logic
-      if (
-        !smtpConfig.username.trim() ||
-        !smtpConfig.password.trim()
-      ) {
+      if (!smtpConfig.username.trim() || !smtpConfig.password.trim()) {
         const message =
           "Email setup required! Please set your sender email & app password in the **Profile** tab before sending.";
         setMessages((prev) => [
@@ -507,9 +510,9 @@ export default function CardanoInvoiceApp() {
         );
         return;
       }
-      
-      if (!doc.customerEmail || !doc.customerEmail.includes('@')) {
-         const message =
+
+      if (!doc.customerEmail || !doc.customerEmail.includes("@")) {
+        const message =
           "Email sending failed: Please ensure a valid client email is entered in the form before generating the document.";
         setMessages((prev) => [
           ...prev,
@@ -525,16 +528,13 @@ export default function CardanoInvoiceApp() {
         return;
       }
 
-
       try {
         setSendingDocId(doc.id);
-        // --- REAL API CALL TO BACKEND ---
         await sendDocumentEmailViaBackend(doc, smtpConfig);
-        // --------------------------------
 
         const sentAt = new Date().toISOString();
         const message = `Email Sent! ${doc.docType} ${doc.id} delivered to ${doc.customerEmail}. Client can now Approve/Reject via email.`;
-        
+
         setMessages((prev) => {
           const updatedMessages = prev.map((msg) => {
             if (msg.type === "invoice_card" && msg.data.id === doc.id) {
@@ -544,7 +544,8 @@ export default function CardanoInvoiceApp() {
                   ...msg.data,
                   lastSentTo: doc.customerEmail,
                   lastSentAt: sentAt,
-                  status: doc.docType === "QUOTE" ? "SENT" : "PENDING_SENT",
+                  status:
+                    doc.docType === "QUOTE" ? "SENT" : "PENDING_SENT",
                 },
               };
             }
@@ -556,14 +557,24 @@ export default function CardanoInvoiceApp() {
             { id: Date.now(), role: "system_alert", text: message },
           ];
         });
-        
-        setReceipts(prev => prev.map(r => r.id === doc.id ? {...r, status: doc.docType === "QUOTE" ? "SENT" : "PENDING_SENT"} : r));
 
-        // Start polling for Quotes to get the client's decision
+        setReceipts((prev) =>
+          prev.map((r) =>
+            r.id === doc.id
+              ? {
+                  ...r,
+                  status:
+                    doc.docType === "QUOTE"
+                      ? "SENT"
+                      : "PENDING_SENT",
+                }
+              : r
+          )
+        );
+
         if (doc.docType === "QUOTE") {
-          setPolledDocs(prev => [...new Set([...prev, doc.id])]);
+          setPolledDocs((prev) => [...new Set([...prev, doc.id])]);
         }
-
       } catch (error) {
         console.error(error);
         const message = `Failed to send email for ${doc.id}: ${error.message}`;
@@ -583,11 +594,7 @@ export default function CardanoInvoiceApp() {
       }
       return;
     }
-
-    // Removed action === "share" logic
   };
-
-  // --- RENDER LOGIC ---
 
   if (!isLoggedIn) {
     return <LoginScreen onLogin={handleLogin} />;
@@ -603,7 +610,6 @@ export default function CardanoInvoiceApp() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
       `}</style>
 
-      {/* MAIN APPLICATION CONTAINER */}
       <div className="flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden">
         {/* SIDEBAR */}
         <div className="w-20 md:w-64 flex-shrink-0 bg-gray-950 border-r border-gray-800 flex flex-col">
@@ -638,8 +644,8 @@ export default function CardanoInvoiceApp() {
           </nav>
 
           <div className="p-4 border-t border-gray-800">
-             <div className="hidden md:block text-xs text-gray-500 mb-2 truncate">
-                User: {userProfile.username}
+            <div className="hidden md:block text-xs text-gray-500 mb-2 truncate">
+              User: {userProfile.username}
             </div>
             <SidebarItem
               icon={<LogOut size={20} />}
@@ -652,7 +658,6 @@ export default function CardanoInvoiceApp() {
 
         {/* MAIN CONTENT */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* HEADER */}
           <header className="h-16 border-b border-gray-800 bg-gray-900 flex items-center justify-between px-6 shadow-sm z-10">
             <h2 className="text-lg font-medium text-white">
               {activeTab === "chat"
@@ -662,12 +667,10 @@ export default function CardanoInvoiceApp() {
                 : "Profile & Settings"}
             </h2>
 
-            {/* Global Send to Client Button */}
             {activeTab === "chat" && (
               <button
                 onClick={handleSendLatestToClient}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 
-                    bg-blue-600 hover:bg-blue-500 text-white shadow-lg`}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg"
               >
                 <Send size={16} />
                 Send Last Document
@@ -675,7 +678,6 @@ export default function CardanoInvoiceApp() {
             )}
           </header>
 
-          {/* BODY */}
           <main className="flex-1 overflow-hidden relative bg-gray-900">
             {activeTab === "chat" && (
               <ChatView
@@ -691,7 +693,9 @@ export default function CardanoInvoiceApp() {
                 sendingDocId={sendingDocId}
               />
             )}
-            {activeTab === "receipts" && <ReceiptsView receipts={receipts} />}
+            {activeTab === "receipts" && (
+              <ReceiptsView receipts={receipts} />
+            )}
             {activeTab === "profile" && (
               <ProfileSettings
                 userProfile={userProfile}
@@ -705,11 +709,7 @@ export default function CardanoInvoiceApp() {
   );
 }
 
-// --- NEW/UPDATED SCREENS AND COMPONENTS ---
-
-/**
- * LOGIN SCREEN
- */
+// === Login Screen ===
 function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState("merchant");
   const [password, setPassword] = useState("cardano123");
@@ -733,7 +733,9 @@ function LoginScreen({ onLogin }) {
         <div className="text-center">
           <Zap className="w-10 h-10 text-blue-500 mx-auto mb-2" />
           <h2 className="text-2xl font-bold text-white">Blue Dot Login</h2>
-          <p className="text-sm text-gray-400">Merchant Access (Demo Credentials)</p>
+          <p className="text-sm text-gray-400">
+            Merchant Access (Demo Credentials)
+          </p>
         </div>
 
         {error && (
@@ -779,13 +781,17 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-/**
- * PROFILE SETTINGS SCREEN (New Tab)
- */
+// === Profile Settings ===
 function ProfileSettings({ userProfile, onUpdateProfile }) {
-  const [smtpUsername, setSmtpUsername] = useState(userProfile.smtpConfig.username);
-  const [smtpPassword, setSmtpPassword] = useState(userProfile.smtpConfig.password);
-  const [cardanoAddress, setCardanoAddress] = useState(userProfile.receivingAddress);
+  const [smtpUsername, setSmtpUsername] = useState(
+    userProfile.smtpConfig.username
+  );
+  const [smtpPassword, setSmtpPassword] = useState(
+    userProfile.smtpConfig.password
+  );
+  const [cardanoAddress, setCardanoAddress] = useState(
+    userProfile.receivingAddress
+  );
 
   const handleSave = (e) => {
     e.preventDefault();
@@ -804,17 +810,19 @@ function ProfileSettings({ userProfile, onUpdateProfile }) {
   return (
     <div className="p-6 h-full overflow-y-auto custom-scrollbar">
       <h3 className="text-xl font-semibold text-white mb-6 flex items-center gap-2">
-        <User size={24} className="text-blue-400" /> Merchant Profile & Settings
+        <User size={24} className="text-blue-400" /> Merchant Profile &
+        Settings
       </h3>
 
       <div className="bg-gray-800 border border-gray-700 p-6 rounded-xl shadow-lg space-y-6 max-w-3xl">
-        {/* Cardano Receiving Address */}
         <div className="space-y-3 border-b border-gray-700 pb-6">
           <h4 className="text-lg font-medium text-white flex items-center gap-2">
-            <Wallet size={20} className="text-teal-400" /> Cardano Wallet (CIP-30)
+            <Wallet size={20} className="text-teal-400" /> Cardano Wallet
+            (CIP-30)
           </h4>
           <p className="text-sm text-gray-400">
-            This address is used to receive **ADA** payments via the **CIP-30 PayLink** protocol.
+            This address is used to receive <strong>ADA</strong> payments via
+            the <strong>CIP-30</strong> PayLink protocol.
           </p>
           <div>
             <label className="text-xs text-gray-400 block mb-1">
@@ -829,20 +837,23 @@ function ProfileSettings({ userProfile, onUpdateProfile }) {
           </div>
         </div>
 
-        {/* SMTP Settings */}
         <div className="space-y-3">
           <h4 className="text-lg font-medium text-white flex items-center gap-2">
             <Mail size={20} className="text-yellow-400" /> Email Setup (SMTP)
           </h4>
           <p className="text-sm text-gray-400">
-            Use your email credentials to deliver quotes and invoices directly to clients.
+            Use your email credentials to deliver quotes and invoices directly
+            to clients.
           </p>
-          
+
           <div className="rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 flex items-center gap-2 text-xs text-gray-300">
-              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
-              <span>Server settings are preconfigured for Gmail (smtp.gmail.com:587).</span>
-            </div>
-          
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+            <span>
+              Server settings are preconfigured for Gmail
+              (smtp.gmail.com:587).
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-400">Sender Email</label>
@@ -854,21 +865,20 @@ function ProfileSettings({ userProfile, onUpdateProfile }) {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-400">
-                App Password
-              </label>
+              <label className="text-xs text-gray-400">App Password</label>
               <input
                 type="password"
                 value={smtpPassword}
                 onChange={(e) => setSmtpPassword(e.target.value)}
                 placeholder="16-char app password"
-                className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm
-                text-white focus:outline-none focus:border-blue-500"
+                className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
           <p className="text-[11px] text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
-            Tip: For Gmail, you must generate a 16-character **App Password** for "Mail" in your Google Security settings. Never use your normal login password.
+            Tip: For Gmail, you must generate a 16-character{" "}
+            <strong>App Password</strong> for "Mail" in your Google Security
+            settings. Never use your normal login password.
           </p>
         </div>
 
@@ -883,9 +893,7 @@ function ProfileSettings({ userProfile, onUpdateProfile }) {
   );
 }
 
-/**
- * CHAT VIEW (Extracted from CardanoInvoiceApp for cleanliness)
- */
+// === Chat View ===
 function ChatView({
   messages,
   isTyping,
@@ -900,7 +908,6 @@ function ChatView({
 }) {
   return (
     <div className="h-full flex flex-col">
-      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar">
         {messages.map((msg) => (
           <div
@@ -909,17 +916,21 @@ function ChatView({
               msg.role === "user" ? "justify-end" : "justify-start"
             } ${msg.role === "system_alert" ? "w-full" : ""}`}
           >
-            {/* System Alert Bubble (Masumi/System Feedback) */}
             {msg.role === "system_alert" && (
               <div className="w-full text-center">
-                <div className={`inline-flex items-center px-4 py-2 text-sm rounded-full shadow-lg 
-                    ${msg.text.includes("Masumi") ? "bg-green-600/20 text-green-300 border border-green-600" : "bg-yellow-600/20 text-yellow-300 border border-yellow-600"}`}>
+                <div
+                  className={`inline-flex items-center px-4 py-2 text-sm rounded-full shadow-lg 
+                    ${
+                      msg.text.includes("Masumi")
+                        ? "bg-green-600/20 text-green-300 border border-green-600"
+                        : "bg-yellow-600/20 text-yellow-300 border border-yellow-600"
+                    }`}
+                >
                   {msg.text}
                 </div>
               </div>
             )}
 
-            {/* Chat Bubbles */}
             {(msg.role === "user" || msg.role === "agent") && (
               <div
                 className={`max-w-[95%] md:max-w-[85%] lg:max-w-[70%] ${
@@ -979,7 +990,6 @@ function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
       <div className="p-4 bg-gray-900 border-t border-gray-800">
         <form
           onSubmit={handleSendMessage}
@@ -1004,16 +1014,13 @@ function ChatView({
   );
 }
 
-
-// --- OTHER COMPONENTS (Re-used/Modified) ---
-
-/**
- * QUICK ACTIONS BUBBLE
- */
+// === Quick Actions ===
 function QuickActionsBubble({ onAction }) {
   return (
     <div className="bg-gray-800 border border-gray-700 p-4 rounded-2xl rounded-bl-none shadow-sm flex flex-col gap-3">
-      <p className="text-gray-200 text-sm">Select an action (Masumi invocation required):</p>
+      <p className="text-gray-200 text-sm">
+        Select an action (Masumi invocation required):
+      </p>
       <div className="flex gap-3 flex-wrap">
         <button
           onClick={() => onAction("QUOTE")}
@@ -1032,22 +1039,28 @@ function QuickActionsBubble({ onAction }) {
   );
 }
 
-/**
- * INVOICE FORM BUBBLE
- */
+// === Invoice Form Bubble ===
 function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
   const [submitted, setSubmitted] = useState(false);
-  const [docType, setDocType] = useState(defaultType); // INVOICE | QUOTE
+  const [docType, setDocType] = useState(defaultType);
   const [currency, setCurrency] = useState("USD");
   const [customerName, setCustomerName] = useState("Acme Corp");
-  const [customerEmail, setCustomerEmail] = useState("client@example.com"); 
+  const [customerEmail, setCustomerEmail] = useState("client@example.com");
   const [gstNumber, setGstNumber] = useState("");
-  const [billingAddr, setBillingAddr] = useState("123 Main St, New York, NY 10001");
+  const [billingAddr, setBillingAddr] = useState(
+    "123 Main St, New York, NY 10001"
+  );
   const [termsAndConditions, setTermsAndConditions] = useState(
     "Payment due within 30 days. Late payments incur a 5% penalty. **CIP-30 payment required in ADA.**"
   );
   const [items, setItems] = useState([
-    { id: 1, desc: "Cardano DApp Development", qty: 1, price: 500, taxRate: 0 },
+    {
+      id: 1,
+      desc: "Cardano DApp Development",
+      qty: 1,
+      price: 500,
+      taxRate: 0,
+    },
   ]);
 
   const addItem = () => {
@@ -1079,13 +1092,12 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
   };
 
   const handleSubmit = () => {
-    
     if (
       !customerName.trim() ||
       !billingAddr.trim() ||
       !termsAndConditions.trim() ||
       !customerEmail.trim() ||
-      !customerEmail.includes('@')
+      !customerEmail.includes("@")
     ) {
       console.error(
         "Client Name, Email, Billing Address, and Terms & Conditions are mandatory."
@@ -1126,14 +1138,12 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden shadow-lg rounded-bl-none text-sm animate-in zoom-in-95 duration-300 w-full">
-      {/* Header */}
       <div className="bg-gradient-to-r from-gray-900 to-gray-800 p-3 border-b border-gray-700 flex justify-between items-center">
         <span className="font-semibold text-white flex items-center gap-2">
           <Calculator size={16} className="text-blue-400" /> New Document
           Details
         </span>
-        <div className="flex bg-gray-900 rounded-lg
-          p-0.5">
+        <div className="flex bg-gray-900 rounded-lg p-0.5">
           <button
             onClick={() => setDocType("QUOTE")}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
@@ -1158,7 +1168,6 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
       </div>
 
       <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
-        {/* Customer Section */}
         <div className="space-y-3">
           <label className="text-xs font-semibold text-gray-500 uppercase">
             Client Details (Mandatory fields *)
@@ -1166,8 +1175,7 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
           <input
             type="text"
             placeholder="* Client / Company Name"
-            className="w-full bg-gray-900
-            border border-gray-700 rounded p-2 text-white focus:border-blue-500 outline-none"
+            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-blue-500 outline-none"
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
           />
@@ -1194,7 +1202,6 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
           />
         </div>
 
-        {/* Line Items Section */}
         <div className="space-y-3 pt-2 border-t border-gray-700">
           <div className="flex justify-between items-center">
             <label className="text-xs font-semibold text-gray-500 uppercase">
@@ -1222,13 +1229,14 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
                   placeholder="* Item Description"
                   className="flex-1 bg-transparent border-b border-gray-700 text-white text-sm focus:border-blue-500 outline-none mr-2"
                   value={item.desc}
-                  onChange={(e) => updateItem(item.id, "desc", e.target.value)}
+                  onChange={(e) =>
+                    updateItem(item.id, "desc", e.target.value)
+                  }
                 />
                 {items.length > 1 && (
                   <button
                     onClick={() => removeItem(item.id)}
-                    className="text-red-500
-                    hover:text-red-400 opacity-100 group-hover:opacity-100 transition-opacity"
+                    className="text-red-500 hover:text-red-400 opacity-100 group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1278,14 +1286,12 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
           ))}
           <button
             onClick={addItem}
-            className="text-xs text-blue-400 hover:text-blue-300 flex
-            items-center gap-1"
+            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
           >
             <Plus size={12} /> Add Item
           </button>
         </div>
 
-        {/* Terms and Conditions */}
         <div className="space-y-2 pt-2 border-t border-gray-700">
           <label className="text-xs font-semibold text-gray-500 uppercase">
             * Terms & Conditions
@@ -1299,13 +1305,17 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
           />
         </div>
 
-        {/* Total Preview */}
         <div className="bg-gray-900 rounded p-3 flex justify-between items-center border border-gray-700">
           <span className="text-gray-400 text-xs">Total:</span>
           <span className="text-white font-bold text-lg">
-            {currency === "USD" ?
-              "$" : currency === "INR" ? "₹" : currency === "EUR" ?
-                "€" : "₳"} {calculateTotals().total.toFixed(2)}
+            {currency === "USD"
+              ? "$"
+              : currency === "INR"
+              ? "₹"
+              : currency === "EUR"
+              ? "€"
+              : "₳"}{" "}
+            {calculateTotals().total.toFixed(2)}
           </span>
         </div>
 
@@ -1324,11 +1334,20 @@ function InvoiceFormBubble({ onSubmit, defaultType = "INVOICE" }) {
   );
 }
 
-/**
- * INVOICE PREVIEW CARD
- */
+// === Invoice Preview Card ===
 function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
-  const { id, docType, customerName, total, amountADA, status, lastSentTo, lastSentAt, clientDecision, merchantAddress } = data;
+  const {
+    id,
+    docType,
+    customerName,
+    total,
+    amountADA,
+    status,
+    lastSentTo,
+    lastSentAt,
+    clientDecision,
+    merchantAddress,
+  } = data;
   const isQuote = docType === "QUOTE";
 
   let statusBadge;
@@ -1344,11 +1363,15 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
         CLIENT REJECTED
       </span>
     );
-  } else if (status === "PENDING_SENT" || status === "PENDING" || status === "SENT") {
-    // If quote is SENT, show PENDING CLIENT to indicate we're waiting for decision/payment
+  } else if (
+    status === "PENDING_SENT" ||
+    status === "PENDING" ||
+    status === "SENT"
+  ) {
     let displayStatus = status;
     if (status === "SENT" && isQuote) displayStatus = "PENDING CLIENT DECISION";
-    else if (status === "PENDING_SENT") displayStatus = "PENDING CLIENT PAYMENT";
+    else if (status === "PENDING_SENT")
+      displayStatus = "PENDING CLIENT PAYMENT";
 
     statusBadge = (
       <span className="px-3 py-1 rounded text-xs font-bold uppercase text-yellow-600 border-yellow-200 bg-yellow-50">
@@ -1368,35 +1391,33 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
       </span>
     );
   } else {
-     statusBadge = (
+    statusBadge = (
       <span className="px-3 py-1 rounded text-xs font-bold uppercase text-gray-600 border-gray-200 bg-gray-50">
         {status || "DRAFT"}
       </span>
     );
   }
 
-  // Logic to determine currency symbol based on the total's original currency
-  const currencySymbol = data.currency === "USD" ? "$" : data.currency === "INR" ?
-    "₹" : data.currency === "EUR" ? "€" : "₳";
-
+  const currencySymbol =
+    data.currency === "USD"
+      ? "$"
+      : data.currency === "INR"
+      ? "₹"
+      : data.currency === "EUR"
+      ? "€"
+      : "₳";
 
   return (
     <div className="w-full max-w-md bg-white text-gray-900 rounded-sm overflow-hidden shadow-2xl transform transition-all relative">
       <style>{`
-        .invoice-card-container {
-          max-width: 100vw;
-        }
-        .text-wrap-break {
-          word-break: break-word;
-        }
+        .invoice-card-container { max-width: 100vw; }
+        .text-wrap-break { word-break: break-word; }
       `}</style>
-      {/* Decorative Top Border */}
       <div
         className={`h-2 w-full ${isQuote ? "bg-blue-600" : "bg-teal-600"}`}
       ></div>
 
       <div className="p-6 md:p-8 invoice-card-container">
-        {/* Header Section */}
         <div className="flex justify-between items-start mb-8">
           <div>
             <div className="flex items-center gap-2 mb-2">
@@ -1412,7 +1433,7 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              Service: {data.items[0]?.desc || 'General Service'}
+              Service: {data.items[0]?.desc || "General Service"}
             </p>
           </div>
           <div className="text-right">
@@ -1426,7 +1447,6 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
           </div>
         </div>
 
-        {/* Client Details Grid */}
         <div className="grid grid-cols-2 gap-8 mb-8 border-t border-b border-gray-100 py-6">
           <div>
             <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1 block">
@@ -1450,58 +1470,60 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
               </span>
             </div>
 
-            <div className="inline-block self-end mt-2">
-                {statusBadge}
-            </div>
+            <div className="inline-block self-end mt-2">{statusBadge}</div>
           </div>
         </div>
 
-        {/* Line Items Table (Showing all products) */}
         <h3 className="font-bold text-sm text-gray-700 mb-2">Line Items</h3>
         <div className="mb-6 overflow-x-auto border border-gray-100 rounded-lg">
-            <table className="min-w-full divide-y divide-gray-100">
-                <thead className="bg-gray-50">
-                    <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">
-                            Description
-                        </th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Qty
-                        </th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Unit Price
-                        </th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Total
-                        </th>
-                    </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                    {data.items.map((item, index) => (
-                        <tr key={index}>
-                            <td className="px-3 py-2 text-sm font-medium text-gray-800">
-                                {item.desc}
-                                {item.taxRate > 0 && (
-                                    <span className="text-xs text-gray-400 ml-2">({item.taxRate}% Tax)</span>
-                                )}
-                            </td>
-                            <td className="px-3 py-2 text-sm text-right text-gray-700">
-                                {item.qty}
-                            </td>
-                            <td className="px-3 py-2 text-sm text-right text-gray-700 whitespace-nowrap">
-                                {currencySymbol} {item.price.toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2 text-sm font-semibold text-right text-gray-800 whitespace-nowrap">
-                                {currencySymbol} {(item.qty * item.price * (1 + item.taxRate / 100)).toFixed(2)}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+          <table className="min-w-full divide-y divide-gray-100">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">
+                  Description
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Qty
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Unit Price
+                </th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-100">
+              {data.items.map((item, index) => (
+                <tr key={index}>
+                  <td className="px-3 py-2 text-sm font-medium text-gray-800">
+                    {item.desc}
+                    {item.taxRate > 0 && (
+                      <span className="text-xs text-gray-400 ml-2">
+                        ({item.taxRate}% Tax)
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-right text-gray-700">
+                    {item.qty}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-right text-gray-700 whitespace-nowrap">
+                    {currencySymbol} {item.price.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2 text-sm font-semibold text-right text-gray-800 whitespace-nowrap">
+                    {currencySymbol}{" "}
+                    {(
+                      item.qty *
+                      item.price *
+                      (1 + item.taxRate / 100)
+                    ).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-
-        {/* Merchant Cardano Address Detail */}
         <div className="pt-4 mb-4 border-t border-gray-100">
           <h4 className="font-bold text-xs text-gray-700 mb-1 flex items-center gap-1">
             <Key size={12} /> Payment Address
@@ -1511,8 +1533,6 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
           </p>
         </div>
 
-
-        {/* Terms and Conditions */}
         <div className="pt-2 mb-8">
           <h4 className="font-bold text-sm text-gray-700 mb-1">
             Terms & Conditions
@@ -1522,7 +1542,6 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
           </div>
         </div>
 
-        {/* Footer / Totals */}
         <div className="flex justify-end mb-8">
           <div className="w-full sm:w-1/2 space-y-2">
             <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-100">
@@ -1533,21 +1552,21 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
             </div>
             <div className="flex justify-between text-sm font-medium text-teal-600 mt-1">
               <span>Client Must Pay (ADA)</span>
-              <span className="whitespace-nowrap font-bold text-lg">{amountADA} ₳</span>
+              <span className="whitespace-nowrap font-bold text-lg">
+                {amountADA} ₳
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Call to Action and Metadata */}
         <div className="space-y-3">
-          {/* Action Buttons: Send Email (now full width) */}
           <button
             onClick={() => onDocumentAction(data, "send")}
             disabled={isSendingEmail}
             className={`w-full py-3 rounded-lg text-lg font-bold transition-colors flex items-center justify-center gap-2 ${
               isSendingEmail
                 ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700 text-white" 
+                : "bg-blue-600 hover:bg-blue-700 text-white"
             }`}
           >
             {isSendingEmail ? (
@@ -1573,9 +1592,7 @@ function InvoicePreviewCard({ data, onDocumentAction, isSendingEmail }) {
   );
 }
 
-/**
- * RECEIPTS / HISTORY VIEW
- */
+// === Receipts View ===
 function ReceiptsView({ receipts }) {
   return (
     <div className="p-6 h-full overflow-y-auto custom-scrollbar">
@@ -1643,8 +1660,14 @@ function ReceiptsView({ receipts }) {
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2 group cursor-pointer">
-                    <span className={`text-xs font-mono transition-colors truncate max-w-[120px] 
-                       ${receipt.hash === "TX_AWAITING" ? "text-yellow-500" : "text-gray-500 group-hover:text-blue-400"}`}>
+                    <span
+                      className={`text-xs font-mono transition-colors truncate max-w-[120px] 
+                       ${
+                         receipt.hash === "TX_AWAITING"
+                           ? "text-yellow-500"
+                           : "text-gray-500 group-hover:text-blue-400"
+                       }`}
+                    >
                       {receipt.hash}
                     </span>
                   </div>
@@ -1683,21 +1706,20 @@ function StatusBadge({ status }) {
       icon = <Send size={12} />;
       break;
     default:
-      // DRAFT or others
       break;
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${colorClass}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${colorClass}`}
+    >
       {icon}
       {status}
     </span>
   );
 }
 
-/**
- * HELPER COMPONENTS
- */
+// Sidebar item
 function SidebarItem({ icon, label, active, onClick }) {
   return (
     <button
