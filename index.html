@@ -8,6 +8,12 @@
   </head>
   <body>
     <div id="root"></div> 
+    <!-- Cardano CIP-30 Wallet Providers (Eternl & others) -->
+    <script>
+      // Wallet providers are typically injected by the browser extension
+      // This waits for the window.cardano object to be available
+      window.cardanoProviders = window.cardano || {};
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
